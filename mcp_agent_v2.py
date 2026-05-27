@@ -317,7 +317,7 @@ def chain_findings(url: str, findings: list[Finding], tools: list[dict], stealth
 # ============================================================
 
 def generate_report(findings: list[Finding], server_info: dict, output_dir: str = "reports") -> Path:
-    """Generate HTML report with evidence."""
+    """Generate polished HTML report with evidence."""
     Path(output_dir).mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     path = Path(output_dir) / f"mcp_scan_{timestamp}.html"
@@ -333,31 +333,94 @@ def generate_report(findings: list[Finding], server_info: dict, output_dir: str 
     finding_cards = ""
     for f in findings:
         color = {"critical": "#f85149", "high": "#f0883e", "medium": "#d29922", "low": "#58a6ff"}.get(f.severity, "#8b949e")
+        badge_bg = {"critical": "#f8514920", "high": "#f0883e20", "medium": "#d2992220", "low": "#58a6ff20"}.get(f.severity, "#8b949e20")
         ev_html = ""
         if f.evidence:
-            ev_html = f'<details><summary>Evidence</summary><pre>{esc(f.evidence.response_body[:800])}</pre></details>'
-        chain_html = f'<p style="color:#bc8cff">Chained from: {esc(f.chained_from)}</p>' if f.chained_from else ""
-        finding_cards += f'<div style="border-left:4px solid {color};background:#161b22;padding:1rem;margin:0.5rem 0;border-radius:6px"><strong>[{f.severity.upper()}]</strong> {esc(f.title)}<br><small>{esc(f.details)}</small>{chain_html}{ev_html}</div>\n'
+            req_body = json.dumps(f.evidence.request_body, indent=2) if isinstance(f.evidence.request_body, dict) else str(f.evidence.request_body)
+            ev_html = f"""<details><summary>Evidence (click to expand)</summary>
+<div class="evidence">
+<div class="ev-row"><span class="ev-label">Timestamp</span><span>{esc(f.evidence.timestamp)}</span></div>
+<div class="ev-row"><span class="ev-label">HTTP Status</span><span>{f.evidence.response_code}</span></div>
+<div class="ev-row"><span class="ev-label">Request</span><pre>{esc(req_body[:600])}</pre></div>
+<div class="ev-row"><span class="ev-label">Response</span><pre>{esc(f.evidence.response_body[:800])}</pre></div>
+</div></details>"""
+        chain_html = f'<div class="chain-badge">Chained from: {esc(f.chained_from)}</div>' if f.chained_from else ""
 
-    html = f"""<!DOCTYPE html><html><head><meta charset="UTF-8"><title>MCP Scan Report</title>
-<style>*{{margin:0;padding:0;box-sizing:border-box}}body{{font-family:system-ui;background:#0f1117;color:#e1e4e8;padding:2rem}}
-.container{{max-width:900px;margin:0 auto}}h1{{color:#58a6ff;margin-bottom:1rem}}h2{{color:#bc8cff;margin:1.5rem 0 0.5rem;border-bottom:1px solid #21262d;padding-bottom:0.3rem}}
-pre{{background:#0d1117;border:1px solid #21262d;padding:0.5rem;border-radius:4px;font-size:0.75rem;overflow-x:auto;white-space:pre-wrap}}
-details{{margin-top:0.5rem}}summary{{cursor:pointer;color:#58a6ff;font-size:0.8rem}}
-.stats{{display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin:1rem 0}}
-.stat{{background:#161b22;padding:1rem;border-radius:8px;text-align:center}}
-.stat .n{{font-size:1.8rem;font-weight:700}}</style></head><body><div class="container">
-<h1>MCP Security Scan Report</h1>
-<p style="color:#8b949e">Target: {esc(server_info.get('url','?'))} | Server: {esc(server_info.get('name','?'))} | Date: {timestamp}</p>
-<div class="stats">
-<div class="stat"><div class="n" style="color:#f85149">{len(crits)}</div>Critical</div>
-<div class="stat"><div class="n" style="color:#f0883e">{len(highs)}</div>High</div>
-<div class="stat"><div class="n" style="color:#d29922">{len(meds)}</div>Medium</div>
-<div class="stat"><div class="n" style="color:#58a6ff">{len(lows)}</div>Low</div>
+        finding_cards += f"""<div class="finding-card" style="border-left-color:{color}">
+<div class="finding-header">
+<span class="severity-badge" style="background:{badge_bg};color:{color}">{f.severity.upper()}</span>
+<span class="finding-category">{esc(f.category)}</span>
 </div>
-<h2>Findings</h2>
-{finding_cards}
-</div></body></html>"""
+<h3>{esc(f.title)}</h3>
+<p class="finding-details">{esc(f.details)}</p>
+{chain_html}{ev_html}
+</div>\n"""
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MCP Security Scan — {esc(server_info.get('name', 'Unknown'))}</title>
+<style>
+:root{{--bg:#0f1117;--card:#161b22;--border:#21262d;--text:#e1e4e8;--muted:#8b949e;--accent:#58a6ff;--purple:#bc8cff}}
+*{{margin:0;padding:0;box-sizing:border-box}}
+body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.6}}
+.container{{max-width:1000px;margin:0 auto;padding:2rem}}
+header{{text-align:center;padding:2rem 0;border-bottom:1px solid var(--border);margin-bottom:2rem}}
+header h1{{font-size:2.2rem;background:linear-gradient(135deg,var(--accent),var(--purple));-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:0.5rem}}
+header p{{color:var(--muted)}}
+.stats{{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:1rem;margin:2rem 0}}
+.stat{{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:1.5rem;text-align:center;transition:transform 0.2s}}
+.stat:hover{{transform:translateY(-2px)}}
+.stat .value{{font-size:2.5rem;font-weight:800}}
+.stat .label{{color:var(--muted);font-size:0.8rem;text-transform:uppercase;letter-spacing:0.05em;margin-top:0.3rem}}
+.stat.critical .value{{color:#f85149}}
+.stat.high .value{{color:#f0883e}}
+.stat.medium .value{{color:#d29922}}
+.stat.low .value{{color:#58a6ff}}
+h2{{font-size:1.4rem;color:var(--purple);margin:2.5rem 0 1rem;padding-bottom:0.5rem;border-bottom:1px solid var(--border)}}
+.finding-card{{background:var(--card);border:1px solid var(--border);border-left:4px solid;border-radius:10px;padding:1.5rem;margin:1rem 0;transition:border-color 0.2s}}
+.finding-card:hover{{border-color:var(--accent)}}
+.finding-header{{display:flex;align-items:center;gap:0.75rem;margin-bottom:0.5rem}}
+.severity-badge{{padding:0.2rem 0.7rem;border-radius:4px;font-size:0.7rem;font-weight:700;letter-spacing:0.03em}}
+.finding-category{{color:var(--muted);font-size:0.8rem}}
+.finding-card h3{{font-size:1rem;margin-bottom:0.4rem}}
+.finding-details{{color:var(--muted);font-size:0.85rem}}
+.chain-badge{{margin-top:0.5rem;padding:0.3rem 0.6rem;background:#bc8cff15;border:1px solid #bc8cff30;border-radius:4px;font-size:0.75rem;color:var(--purple);display:inline-block}}
+details{{margin-top:0.8rem}}
+summary{{cursor:pointer;color:var(--accent);font-size:0.8rem;font-weight:600}}
+.evidence{{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:1rem;margin-top:0.5rem}}
+.ev-row{{display:flex;gap:1rem;margin-bottom:0.5rem;font-size:0.8rem}}
+.ev-label{{color:var(--muted);min-width:80px;font-weight:600}}
+pre{{background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.6rem;font-size:0.72rem;overflow-x:auto;white-space:pre-wrap;word-wrap:break-word;margin-top:0.3rem;max-height:300px;overflow-y:auto}}
+.meta{{color:var(--muted);font-size:0.8rem;margin-top:3rem;padding-top:1rem;border-top:1px solid var(--border);text-align:center}}
+.no-findings{{color:#3fb950;font-style:italic;padding:1.5rem;background:#3fb95008;border-radius:8px;text-align:center}}
+@media print{{body{{background:#fff;color:#000}}.finding-card{{border:1px solid #ccc}}}}
+</style>
+</head>
+<body>
+<div class="container">
+<header>
+<h1>MCP Security Scan Report</h1>
+<p>Target: {esc(server_info.get('url', '?'))} | Server: {esc(server_info.get('name', '?'))} v{esc(server_info.get('version', '?'))}</p>
+<p>Scan date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+</header>
+
+<div class="stats">
+<div class="stat critical"><div class="value">{len(crits)}</div><div class="label">Critical</div></div>
+<div class="stat high"><div class="value">{len(highs)}</div><div class="label">High</div></div>
+<div class="stat medium"><div class="value">{len(meds)}</div><div class="label">Medium</div></div>
+<div class="stat low"><div class="value">{len(lows)}</div><div class="label">Low</div></div>
+</div>
+
+<h2>Findings ({len(findings)})</h2>
+{finding_cards if findings else '<p class="no-findings">No vulnerabilities detected.</p>'}
+
+<p class="meta">Generated by MCP Honeypot Tester | github.com/Jake-Schoellkopf/mcp-honeypot-tester</p>
+</div>
+</body>
+</html>"""
 
     path.write_text(html, encoding="utf-8")
     return path
